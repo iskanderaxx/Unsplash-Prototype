@@ -1,18 +1,27 @@
 
 import Foundation
 
-final class UnsplashFileManager {
+protocol FileManagerProtocol {
+    static var shared: UnsplashFileManager { get }
+    func saveImage(from imageData: Data, with imageName: String)
+    func fileExists(imageName: String) -> Bool
+}
+
+final class UnsplashFileManager: FileManagerProtocol {
+    
+    // MARK: State & DI
     
     static let shared = UnsplashFileManager()
     private init() {}
     
+    static var cacheDirectory: URL? {
+        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
+    }
+    
     // MARK: FM Methods
     
     func saveImage(from imageData: Data, with imageName: String) {
-        let fileManager = FileManager.default
-        guard let cacheDirectory = fileManager.urls(for: .cachesDirectory,
-                                                       in: .userDomainMask
-        ).first else {
+        guard let cacheDirectory = UnsplashFileManager.cacheDirectory else {
             print(UnsplashError.directoryNotFound.localizedDescription)
             return
         }
@@ -27,12 +36,10 @@ final class UnsplashFileManager {
     }
     
     func fileExists(imageName: String) -> Bool {
-        let fileManager = FileManager.default
-        guard let cacheDirectory = fileManager.urls(for: .cachesDirectory,
-                                                       in: .userDomainMask
-        ).first else { return false }
+        guard let cacheDirectory = UnsplashFileManager.cacheDirectory else { return false }
         
         let filePath = cacheDirectory.appendingPathComponent("\(imageName).jpg")
-        return fileManager.fileExists(atPath: filePath.path)
+        return FileManager.default.fileExists(atPath: filePath.path)
     }
 }
+

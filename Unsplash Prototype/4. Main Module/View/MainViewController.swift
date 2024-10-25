@@ -1,11 +1,24 @@
 
 import UIKit
+import Combine
 
-final class MainViewController: UIViewController {
+protocol MainViewControllerProtocol: AnyObject {
+    var viewModel: MainViewModelProtocol { get }
+    
+    func setupBindings()
+    func reloadCollectionView()
+    func setupViewsHierarchy()
+    func setupViewsLayout()
+}
+
+final class MainViewController: UIViewController, MainViewControllerProtocol {
     
     // MARK: State & DI
     
-    private let viewModel = UnsplashViewModel()
+    var viewModel: MainViewModelProtocol
+    var mainViewCoordinator: MainViewCoordinator?
+    private var searchStackViewCenterYConstraint: NSLayoutConstraint?
+    private var cancellables = Set<AnyCancellable>()
     
     // MARK: UI-Elements
     
@@ -67,35 +80,79 @@ final class MainViewController: UIViewController {
         return collectionView
     }()
     
+    private lazy var placeholderStackView: UIStackView = {
+        let stack = UIStackView()
+        stack.axis = .vertical
+        stack.alignment = .center
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        stack.isHidden = true
+        return stack
+    }()
+    
+    private lazy var placeholderImageView: UIImageView = {
+        let imageView = UIImageView()
+        imageView.image = UIImage(named: "placeholder")
+        imageView.contentMode = .scaleAspectFit
+        imageView.translatesAutoresizingMaskIntoConstraints = false
+        return imageView
+    }()
+    
+    private lazy var noResultsLabel: UILabel = {
+        let label = UILabel()
+        label.text = "Ничего не найдено"
+        label.textColor = .gray
+        label.font = UIFont.systemFont(ofSize: 16, weight: .medium)
+        label.textAlignment = .center
+        label.translatesAutoresizingMaskIntoConstraints = false
+        return label
+    }()
+    
+    // MARK: Initializers
+    
+    init(viewModel: MainViewModelProtocol) {
+        self.viewModel = viewModel
+        super.init(nibName: nil, bundle: nil)
+    }
+    
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+    
     // MARK: Lifecycle
 
     override func viewDidLoad() {
         super.viewDidLoad()
         
-        reloadCollectionView()
+        if mainViewCoordinator == nil {
+            print("Warning: mainViewCoordinator is nil in MainViewController during viewDidLoad")
+        } else {
+            print("mainViewCoordinator successfully set in MainViewController")
+        }
+        
         setupViewsHierarchy()
         setupViewsLayout()
+        setupBindings()
+        reloadCollectionView()
+        hidePlaceholder()
     }
     
     // MARK: Setup & Layout
     
-    private func reloadCollectionView() {
-        viewModel.reloadCollectionView = { [weak self] in
-            DispatchQueue.main.async {
-                self?.collectionView.reloadData()
-            }
-        }
-    }
-    
     func setupViewsHierarchy() {
-        [searchStackView, loader, collectionView].forEach {
+        [searchStackView, loader, collectionView, placeholderStackView].forEach {
             view.addSubview($0)
         }
         [searchTextField, searchButton].forEach { searchStackView.addArrangedSubview($0) }
+        [placeholderImageView, noResultsLabel].forEach { placeholderStackView.addArrangedSubview($0)}
     }
     
     func setupViewsLayout() {
         addSearchIcon()
+        
+        let centerYConstraint = searchStackView.centerYAnchor.constraint(
+            equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 255
+        )
+        searchStackViewCenterYConstraint = centerYConstraint
         
         NSLayoutConstraint.activate([
             searchStackView.leadingAnchor.constraint(
@@ -104,9 +161,7 @@ final class MainViewController: UIViewController {
             searchStackView.trailingAnchor.constraint(
                 equalTo: view.trailingAnchor, constant: -15
             ),
-            searchStackView.centerYAnchor.constraint(
-                equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 255
-            ),
+            centerYConstraint,
             searchTextField.widthAnchor.constraint(greaterThanOrEqualToConstant: 268),
             searchButton.widthAnchor.constraint(equalToConstant: 82),
             searchStackView.heightAnchor.constraint(equalToConstant: 48),
@@ -123,19 +178,46 @@ final class MainViewController: UIViewController {
             collectionView.trailingAnchor.constraint(
                 equalTo: view.trailingAnchor, constant: -15
             ),
-            collectionView.heightAnchor.constraint(equalToConstant: 878)
+            collectionView.heightAnchor.constraint(equalToConstant: 878),
+            
+            placeholderStackView.centerXAnchor.constraint(
+                equalTo: view.centerXAnchor
+            ),
+            placeholderStackView.centerYAnchor.constraint(
+                equalTo: view.centerYAnchor
+            ),
+            placeholderImageView.widthAnchor.constraint(equalToConstant: 200),
+            placeholderImageView.heightAnchor.constraint(equalToConstant: 200),
         ])
     }
     
-    private func activateLoader() {
-        loader.isHidden = false
-        loader.startAnimating()
+    func setupBindings() {
+        viewModel.imagesPublisher
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] images in
+                self?.collectionView.isHidden = images.isEmpty
+                self?.collectionView.reloadData()
+            }
+            .store(in: &cancellables)
+        
+        viewModel.errorPublisher
+            .sink { error in
+                if let error = error {
+                    print("\(error.localizedDescription)")
+                }
+            }
+            .store(in: &cancellables)
+        
+        viewModel.showNoResults = { [weak self] in
+            self?.showPlaceholder()
+        }
     }
     
-    private func deactivateLoader(after delay: TimeInterval) {
-        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-            self?.loader.stopAnimating()
-            self?.collectionView.isHidden = false
+    func reloadCollectionView() {
+        viewModel.reloadCollectionView = { [weak self] in
+            DispatchQueue.main.async {
+                self?.collectionView.reloadData()
+            }
         }
     }
     
@@ -167,15 +249,10 @@ final class MainViewController: UIViewController {
     @objc
     func searchButtonTapped() {
         guard let query = searchTextField.text, !query.isEmpty else {
-            // To be filled with alert
             return
         }
         
-        NSLayoutConstraint.activate([
-            searchStackView.centerYAnchor.constraint(
-                equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 35
-            )
-        ])
+        searchStackViewCenterYConstraint?.constant = 35
         UIView.animate(withDuration: 0.5) { self.view.layoutIfNeeded() }
         
         collectionView.isHidden = true
@@ -186,7 +263,7 @@ final class MainViewController: UIViewController {
     }
 }
 
-extension MainViewController: UICollectionViewDelegate, UICollectionViewDelegateFlowLayout {
+extension MainViewController: UICollectionViewDelegate, UICollectionViewDataSource, UICollectionViewDelegateFlowLayout {
     func collectionView(_ collectionView: UICollectionView, numberOfItemsInSection section: Int) -> Int {
         viewModel.numberOfRows()
     }
@@ -195,20 +272,49 @@ extension MainViewController: UICollectionViewDelegate, UICollectionViewDelegate
         guard let cell = collectionView.dequeueReusableCell(withReuseIdentifier: UnsplashLayoutCell.identifier, for: indexPath) as? UnsplashLayoutCell else {
             return UICollectionViewCell()
         }
-        viewModel.configure(cell: cell, forRow: indexPath.row)
+        let imageSize: ImageSize = .small
+        viewModel.configure(cell: cell, forRow: indexPath.row, size: imageSize)
         return cell
     }
-}
-
-extension MainViewController: UICollectionViewDataSource {
+    
     func collectionView(_ collectionView: UICollectionView, layout collectionViewLayout: UICollectionViewLayout, sizeForItemAt indexPath: IndexPath) -> CGSize {
         let numberOfItemsPerRow: CGFloat = 3
         let width = collectionView.frame.size.width / numberOfItemsPerRow
         return CGSize(width: width, height: width)
     }
+    
+    func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
+        guard let selectedImage = viewModel.getImage(at: indexPath.row) else { return }
+        mainViewCoordinator?.showDetailView(for: selectedImage)
+    }
+}
+
+extension MainViewController {
+    private func activateLoader() {
+        loader.isHidden = false
+        loader.startAnimating()
+    }
+    
+    private func deactivateLoader(after delay: TimeInterval) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            self?.loader.stopAnimating()
+            self?.collectionView.isHidden = false
+        }
+    }
+    
+    private func showPlaceholder() {
+        placeholderStackView.isHidden = false
+        collectionView.isHidden = true
+    }
+    
+    private func hidePlaceholder() {
+        placeholderStackView.isHidden = true
+        collectionView.isHidden = false
+    }
 }
 
 #Preview {
-    MainViewController()
+    let testModel = MainViewModel()
+    MainViewController(viewModel: testModel)
 }
 
