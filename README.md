@@ -22,5 +22,5 @@
 ### Таблица экранов
 | Главный экран (старт) | Главный экран (поиск) | DetailView |
 | --------------------- | --------------------- | ---------- |
-| <img width="266" alt="скриншот1" src="https://github.com/user-attachments/assets/ccaf44c7-2543-4391-84b5-c1e185561c51"> | <img width="271" alt="скриншот2" src="https://github.com/user-attachments/assets/dc6ceeb6-d601-4a88-b967-ad438aedc17e"> |
+| <img width="266" alt="скриншот1" src="https://github.com/user-attachments/assets/ccaf44c7-2543-4391-84b5-c1e185561c51"> | <img width="271" alt="скриншот2" src="https://github.com/user-attachments/assets/dc6ceeb6-d601-4a88-b967-ad438aedc17e"> | <img width="270" alt="Снимок экрана 2024-11-16 в 13 53 48" src="https://github.com/user-attachments/assets/e1fa39ac-8a9a-4161-96e1-cb4fdc9227ad"> |
 
